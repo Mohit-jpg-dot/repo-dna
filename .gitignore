@@ -9,3 +9,7 @@ build/
 
 # RepoDNA
 .repodna/
+.DS_Store
+.vscode/
+bin/
+build/
