@@ -1,7 +1,11 @@
 package com.repodna.commands;
 
-import com.repodna.scanner.RepositoryScanner;
-import com.repodna.scanner.model.*;
+import com.repodna.dna.DnaEngine;
+import com.repodna.dna.DnaProfile;
+import com.repodna.dna.DnaReportGenerator;
+import com.repodna.discovery.model.Pattern;
+import com.repodna.discovery.model.PatternViolation;
+import com.repodna.scanner.model.LanguageInfo;
 import com.repodna.util.DirectoryValidator;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
@@ -10,13 +14,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
+import java.util.List;
 
 /**
- * Command to execute Repository Scanner and print repository layout metadata.
+ * Command to execute the Repository DNA Engine pipeline and print results.
  */
 @Command(
     name = "analyze",
-    description = "Validate target directory and detect project layout metadata",
+    description = "Validate target directory, parse code, build knowledge graph, and discover engineering DNA patterns",
     mixinStandardHelpOptions = true
 )
 public class AnalyzeCommand implements Callable<Integer> {
@@ -29,61 +34,73 @@ public class AnalyzeCommand implements Callable<Integer> {
         Path targetDir = dir.toAbsolutePath().normalize();
         DirectoryValidator.validate(targetDir);
 
-        ScannerResult result = RepositoryScanner.scan(targetDir);
+        System.out.println("Analyzing repository...");
+        DnaProfile profile = DnaEngine.analyze(targetDir);
 
-        boolean hasReadme = result.documentation().presentDocs().stream()
-            .anyMatch(d -> d.toUpperCase().contains("README"));
-            
-        boolean hasLicense = result.documentation().presentDocs().stream()
-            .anyMatch(d -> d.toUpperCase().contains("LICENSE"));
+        // Generate Reports
+        try {
+            DnaReportGenerator.generateReports(profile, targetDir);
+        } catch (IOException e) {
+            System.err.println("Error generating markdown reports: " + e.getMessage());
+        }
 
-        boolean hasGitignore = result.configs().contains(".gitignore");
-        boolean hasDocker = result.configs().contains("Dockerfile") || result.configs().contains("docker-compose.yml") || result.configs().contains("docker-compose.yaml");
-        boolean hasGithubActions = result.configs().contains(".github/");
-
-        String primaryLanguage = result.primaryLanguage().name();
-        String languagesStr = result.languages().isEmpty() ? "None" : 
-            String.join(", ", result.languages().stream().map(LanguageInfo::name).toList());
-
-        String framework = result.frameworks().isEmpty() ? "None" : result.frameworks().get(0).name();
-        
+        // Detect Java Version for Display
         String javaVersion = "Not detected";
-        if ("Java".equals(primaryLanguage)) {
-            javaVersion = detectJavaVersion(targetDir, result.buildSystem());
+        if (profile.scannerResult().primaryLanguage().name().equalsIgnoreCase("Java")) {
+            javaVersion = detectJavaVersion(targetDir, profile.scannerResult().buildSystem().name());
         }
 
-        String projectSize = "Small";
-        int fileCount = result.stats().fileCount();
-        if (fileCount > 1000) {
-            projectSize = "Large";
-        } else if (fileCount > 100) {
-            projectSize = "Medium";
-        }
-
-        System.out.println("Repository Summary");
-        System.out.println("Repository Name:        " + result.repoName());
-        System.out.println("Git Repository:         " + (result.gitInfo().isGitRepo() ? "Yes" : "No"));
-        System.out.println("Languages:              " + languagesStr);
-        System.out.println("Primary Language:       " + primaryLanguage);
-        System.out.println("Framework:              " + framework);
-        System.out.println("Build System:           " + result.buildSystem().name());
-        System.out.println("Files:                  " + fileCount);
-        System.out.println("Directories:            " + result.stats().directoryCount());
-        System.out.println("README:                 " + (hasReadme ? "Present" : "Missing"));
-        System.out.println("License:                " + (hasLicense ? "Present" : "None"));
-        System.out.println("Git Ignore:             " + (hasGitignore ? "Present" : "Missing"));
-        System.out.println("Docker:                 " + (hasDocker ? "Detected" : "None"));
-        System.out.println("CI:                     " + (hasGithubActions ? "GitHub Actions" : "None"));
-        System.out.println("Package Manager:        " + result.buildSystem().packageManager());
+        // Print Summary to Terminal
+        System.out.println("\nRepository Summary");
+        System.out.println("Repository Name:        " + profile.scannerResult().repoName());
+        System.out.println("Git Repository:         " + (profile.scannerResult().gitInfo().isGitRepo() ? "Yes" : "No"));
+        System.out.println("Primary Language:       " + profile.scannerResult().primaryLanguage().name());
+        System.out.println("Framework:              " + (profile.scannerResult().frameworks().isEmpty() ? "None" : profile.scannerResult().frameworks().get(0).name()));
+        System.out.println("Build System:           " + profile.scannerResult().buildSystem().name());
+        System.out.println("Files:                  " + profile.scannerResult().stats().fileCount());
+        System.out.println("Directories:            " + profile.scannerResult().stats().directoryCount());
         System.out.println("Java Version:           " + javaVersion);
-        System.out.println("Estimated Project Size: " + projectSize);
-        
+
+        System.out.println("\nEngineering DNA Summary");
+        System.out.println("Overall Confidence:     " + (profile.summary().overallConfidence() * 100) + "%");
+        System.out.println("Total Discovered Patterns: " + profile.summary().totalPatterns());
+
+        System.out.println("\nDominant Patterns (>= 70% Confidence):");
+        List<Pattern> dominant = profile.patterns().stream()
+            .filter(p -> p.confidence().score() >= 0.7)
+            .toList();
+        if (dominant.isEmpty()) {
+            System.out.println("  None");
+        } else {
+            for (Pattern p : dominant) {
+                System.out.printf("  - %s: %s (Confidence: %.0f%%)\n", p.name(), p.description(), p.confidence().score() * 100);
+            }
+        }
+
+        System.out.println("\nAnomalies / Violations:");
+        List<PatternViolation> anomalies = profile.patterns().stream()
+            .flatMap(p -> p.violationsList().stream())
+            .toList();
+        if (anomalies.isEmpty()) {
+            System.out.println("  None");
+        } else {
+            for (PatternViolation v : anomalies) {
+                System.out.printf("  - %s: %s\n", v.nodeId(), v.description());
+            }
+        }
+
+        System.out.println("\nGenerated Markdown Reports:");
+        System.out.println("  ✓ REPO_DNA.md");
+        System.out.println("  ✓ AGENTS.md");
+        System.out.println("  ✓ ARCHITECTURE.md");
+        System.out.println("  ✓ PROJECT_RULES.md");
+
         return 0;
     }
 
-    private String detectJavaVersion(Path targetDir, BuildSystemInfo buildSystem) {
+    private String detectJavaVersion(Path targetDir, String buildSystemName) {
         try {
-            if (buildSystem.name().contains("Gradle")) {
+            if (buildSystemName.contains("Gradle")) {
                 Path buildFile = targetDir.resolve("build.gradle.kts");
                 if (!Files.exists(buildFile)) {
                     buildFile = targetDir.resolve("build.gradle");
@@ -96,7 +113,7 @@ public class AnalyzeCommand implements Callable<Integer> {
                         return extractVersion(content, "JavaLanguageVersion.of(");
                     }
                 }
-            } else if ("Maven".equals(buildSystem.name())) {
+            } else if ("Maven".equals(buildSystemName)) {
                 Path pom = targetDir.resolve("pom.xml");
                 if (Files.exists(pom)) {
                     String content = Files.readString(pom);
@@ -106,7 +123,7 @@ public class AnalyzeCommand implements Callable<Integer> {
                 }
             }
         } catch (IOException e) {
-            // fallback gracefully
+            // fallback
         }
         return "Not detected";
     }
