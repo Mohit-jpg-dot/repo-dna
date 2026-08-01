@@ -42,7 +42,12 @@ public class DatabaseManager implements AutoCloseable {
     }
 
     public Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(jdbcUrl);
+        Connection conn = DriverManager.getConnection(jdbcUrl);
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA journal_mode = WAL;");
+            stmt.execute("PRAGMA synchronous = NORMAL;");
+        }
+        return conn;
     }
 
     public boolean isInitialized() {

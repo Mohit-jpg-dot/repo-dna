@@ -66,7 +66,9 @@ public class AnalyzeCommand implements Callable<Integer> {
 
         ProgressReporter progress = new ProgressReporter(10);
         
-        try {
+        try (DatabaseManager dbManager = new DatabaseManager(repodnaDir.resolve("repodna.db"))) {
+            AstCacheStore astCache = new AstCacheStore(dbManager);
+            
             // Step 1: Detect Project Info
             progress.startStep("Detecting project layout");
             ProjectInfo projectInfo = ProjectDetector.detect(repoDir);
@@ -78,14 +80,23 @@ public class AnalyzeCommand implements Callable<Integer> {
             List<SourceFile> sourceFiles = scanner.scan();
             progress.completeStep();
 
-            // Step 3: Parse AST (Java files only in parallel)
+            // Step 3: Parse AST (Java files only in parallel with Cache check)
             progress.startStep("Parsing AST via Tree-sitter");
             List<ParsedFile> parsedFiles = sourceFiles.parallelStream()
                 .filter(sf -> sf.type() == SourceFile.FileType.SOURCE || sf.type() == SourceFile.FileType.TEST)
                 .filter(sf -> "java".equalsIgnoreCase(sf.language()))
                 .map(sf -> {
+                    Path absolutePath = repoDir.resolve(sf.path());
+                    String hash = HashUtils.sha256(absolutePath);
+                    Optional<ParsedFile> cached = astCache.get(sf.path().toString(), hash);
+                    if (cached.isPresent()) {
+                        return cached.get();
+                    }
+                    
                     try (JavaAstParser astParser = new JavaAstParser()) {
-                        return astParser.parse(repoDir.resolve(sf.path()));
+                        ParsedFile parsed = astParser.parse(absolutePath);
+                        astCache.put(sf.path().toString(), hash, parsed);
+                        return parsed;
                     } catch (Exception e) {
                         if (parent.isVerbose()) {
                             System.err.println("Warning: failed to parse " + sf.path() + ": " + e.getMessage());
@@ -155,19 +166,17 @@ public class AnalyzeCommand implements Callable<Integer> {
             ContextGenerator generator = new ContextGenerator(repoDir);
             generator.generateAll(dnaProfile, healthReport, evaluatedRules);
             
-            try (DatabaseManager dbManager = new DatabaseManager(repodnaDir.resolve("repodna.db"))) {
-                AnalysisStore store = new AnalysisStore(dbManager);
-                long runId = store.saveAnalysisRun(projectInfo);
-                store.saveSourceFiles(sourceFiles, runId);
-                
-                Map<String, Integer> scoreMap = new HashMap<>();
-                for (HealthScore hs : healthReport.dimensionScores()) {
-                    scoreMap.put(hs.dimension(), hs.score());
-                }
-                store.saveHealthScores(scoreMap, runId);
-                store.savePatterns(discoveredPatterns, runId);
-                store.saveRules(evaluatedRules, runId);
+            AnalysisStore store = new AnalysisStore(dbManager);
+            long runId = store.saveAnalysisRun(projectInfo);
+            store.saveSourceFiles(sourceFiles, runId);
+            
+            Map<String, Integer> scoreMap = new HashMap<>();
+            for (HealthScore hs : healthReport.dimensionScores()) {
+                scoreMap.put(hs.dimension(), hs.score());
             }
+            store.saveHealthScores(scoreMap, runId);
+            store.savePatterns(discoveredPatterns, runId);
+            store.saveRules(evaluatedRules, runId);
             progress.completeStep();
             
             progress.finish();

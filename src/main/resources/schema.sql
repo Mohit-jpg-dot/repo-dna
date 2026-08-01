@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS health_scores (
     improvements_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS parsed_files_cache (
+    path TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL,
+    parsed_data_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_source_files_run ON source_files(run_id);
 CREATE INDEX IF NOT EXISTS idx_patterns_run ON discovered_patterns(run_id);
 CREATE INDEX IF NOT EXISTS idx_rules_run ON engineering_rules(run_id);
