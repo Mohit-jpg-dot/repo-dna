@@ -9,12 +9,12 @@ public class DependencyGraphBuilder {
     private final List<ParsedFile> parsedFiles;
     
     // Maps for resolving references
-    private final Map<String, String> simpleNameToFqn;  // "UserService" -> "com.example.service.UserService"
-    private final Map<String, ParsedFile> fqnToFile;     // FQN -> parsed file
+    private final Map<String, List<String>> simpleNameToFqns;  // "UserService" -> ["com.example.service.UserService"]
+    private final Map<String, ParsedFile> fqnToFile;            // FQN -> parsed file
     
     public DependencyGraphBuilder(List<ParsedFile> parsedFiles) {
         this.parsedFiles = parsedFiles;
-        this.simpleNameToFqn = new HashMap<>();
+        this.simpleNameToFqns = new HashMap<>();
         this.fqnToFile = new HashMap<>();
         
         for (ParsedFile file : parsedFiles) {
@@ -22,13 +22,13 @@ public class DependencyGraphBuilder {
             String prefix = (pkg != null && !pkg.isEmpty()) ? pkg + "." : "";
             for (ClassDecl clazz : file.classes()) {
                 String fqn = prefix + clazz.name();
-                simpleNameToFqn.put(clazz.name(), fqn);
+                simpleNameToFqns.computeIfAbsent(clazz.name(), k -> new ArrayList<>()).add(fqn);
                 fqnToFile.put(fqn, file);
                 
                 if (clazz.innerClasses() != null) {
                     for (ClassDecl inner : clazz.innerClasses()) {
                         String innerFqn = fqn + "." + inner.name();
-                        simpleNameToFqn.put(inner.name(), innerFqn);
+                        simpleNameToFqns.computeIfAbsent(inner.name(), k -> new ArrayList<>()).add(innerFqn);
                         fqnToFile.put(innerFqn, file);
                     }
                 }
@@ -176,18 +176,12 @@ public class DependencyGraphBuilder {
             return baseType;
         }
         
-        // Check imports
+        // Check explicit imports (e.g. import com.example.admin.User;)
         if (context.imports() != null) {
             for (ImportDecl imp : context.imports()) {
                 if (imp.qualifiedName().endsWith("." + baseType)) {
                     if (fqnToFile.containsKey(imp.qualifiedName())) {
                         return imp.qualifiedName();
-                    }
-                }
-                if (imp.isWildcard()) {
-                    String possibleFqn = imp.qualifiedName() + "." + baseType;
-                    if (fqnToFile.containsKey(possibleFqn)) {
-                        return possibleFqn;
                     }
                 }
             }
@@ -200,9 +194,30 @@ public class DependencyGraphBuilder {
             return samePkgFqn;
         }
         
-        // Check global simple names
-        if (simpleNameToFqn.containsKey(baseType)) {
-            return simpleNameToFqn.get(baseType);
+        // Check wildcard imports (e.g. import com.example.admin.*;)
+        if (context.imports() != null) {
+            for (ImportDecl imp : context.imports()) {
+                if (imp.isWildcard()) {
+                    String possibleFqn = imp.qualifiedName() + "." + baseType;
+                    if (fqnToFile.containsKey(possibleFqn)) {
+                        return possibleFqn;
+                    }
+                }
+            }
+        }
+        
+        // Check global simple name mappings
+        List<String> matches = simpleNameToFqns.get(baseType);
+        if (matches != null && !matches.isEmpty()) {
+            if (matches.size() == 1) {
+                return matches.get(0);
+            }
+            for (String fqn : matches) {
+                if (contextPkg != null && fqn.startsWith(contextPkg + ".")) {
+                    return fqn;
+                }
+            }
+            return matches.get(0);
         }
         
         return null;

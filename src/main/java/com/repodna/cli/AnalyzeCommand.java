@@ -78,25 +78,23 @@ public class AnalyzeCommand implements Callable<Integer> {
             List<SourceFile> sourceFiles = scanner.scan();
             progress.completeStep();
 
-            // Step 3: Parse AST (Java files only)
+            // Step 3: Parse AST (Java files only in parallel)
             progress.startStep("Parsing AST via Tree-sitter");
-            List<ParsedFile> parsedFiles = new ArrayList<>();
-            try (JavaAstParser astParser = new JavaAstParser()) {
-                for (SourceFile sf : sourceFiles) {
-                    if (sf.type() == SourceFile.FileType.SOURCE || sf.type() == SourceFile.FileType.TEST) {
-                        if ("java".equalsIgnoreCase(sf.language())) {
-                            try {
-                                ParsedFile parsed = astParser.parse(repoDir.resolve(sf.path()));
-                                parsedFiles.add(parsed);
-                            } catch (Exception e) {
-                                if (parent.isVerbose()) {
-                                    System.err.println("Warning: failed to parse " + sf.path() + ": " + e.getMessage());
-                                }
-                            }
+            List<ParsedFile> parsedFiles = sourceFiles.parallelStream()
+                .filter(sf -> sf.type() == SourceFile.FileType.SOURCE || sf.type() == SourceFile.FileType.TEST)
+                .filter(sf -> "java".equalsIgnoreCase(sf.language()))
+                .map(sf -> {
+                    try (JavaAstParser astParser = new JavaAstParser()) {
+                        return astParser.parse(repoDir.resolve(sf.path()));
+                    } catch (Exception e) {
+                        if (parent.isVerbose()) {
+                            System.err.println("Warning: failed to parse " + sf.path() + ": " + e.getMessage());
                         }
+                        return null;
                     }
-                }
-            }
+                })
+                .filter(Objects::nonNull)
+                .toList();
             progress.completeStep();
 
             // Step 4: Build Dependency Graph

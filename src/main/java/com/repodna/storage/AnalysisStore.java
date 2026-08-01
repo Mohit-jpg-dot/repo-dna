@@ -65,25 +65,32 @@ public class AnalysisStore {
 
     public void saveSourceFiles(List<SourceFile> files, long runId) {
         String sql = "INSERT INTO source_files (run_id, path, file_type, language, size_bytes, last_modified) VALUES (?, ?, ?, ?, ?, ?)";
-        try (Connection conn = dbManager.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-             
+        Connection conn = null;
+        try {
+            conn = dbManager.getConnection();
             conn.setAutoCommit(false);
-            
-            for (SourceFile file : files) {
-                pstmt.setLong(1, runId);
-                pstmt.setString(2, file.path().toString());
-                pstmt.setString(3, file.type().name());
-                pstmt.setString(4, file.language());
-                pstmt.setLong(5, file.sizeBytes());
-                pstmt.setString(6, file.lastModified() != null ? file.lastModified().toString() : null);
-                pstmt.addBatch();
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                for (SourceFile file : files) {
+                    pstmt.setLong(1, runId);
+                    pstmt.setString(2, file.path().toString());
+                    pstmt.setString(3, file.type().name());
+                    pstmt.setString(4, file.language());
+                    pstmt.setLong(5, file.sizeBytes());
+                    pstmt.setString(6, file.lastModified() != null ? file.lastModified().toString() : null);
+                    pstmt.addBatch();
+                }
+                pstmt.executeBatch();
+                conn.commit();
             }
-            
-            pstmt.executeBatch();
-            conn.commit();
         } catch (SQLException e) {
+            if (conn != null) {
+                try { conn.rollback(); } catch (SQLException ex) { /* ignore */ }
+            }
             throw new RuntimeException("Failed to save source files batch", e);
+        } finally {
+            if (conn != null) {
+                try { conn.close(); } catch (SQLException ex) { /* ignore */ }
+            }
         }
     }
 
@@ -115,24 +122,31 @@ public class AnalysisStore {
 
     public void saveHealthScores(Map<String, Integer> scores, long runId) {
         String sql = "INSERT INTO health_scores (run_id, dimension, score, grade) VALUES (?, ?, ?, ?)";
-        try (Connection conn = dbManager.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-             
+        Connection conn = null;
+        try {
+            conn = dbManager.getConnection();
             conn.setAutoCommit(false);
-            
-            for (Map.Entry<String, Integer> entry : scores.entrySet()) {
-                pstmt.setLong(1, runId);
-                pstmt.setString(2, entry.getKey());
-                int score = entry.getValue();
-                pstmt.setInt(3, score);
-                pstmt.setString(4, getGrade(score));
-                pstmt.addBatch();
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+                    pstmt.setLong(1, runId);
+                    pstmt.setString(2, entry.getKey());
+                    int score = entry.getValue();
+                    pstmt.setInt(3, score);
+                    pstmt.setString(4, getGrade(score));
+                    pstmt.addBatch();
+                }
+                pstmt.executeBatch();
+                conn.commit();
             }
-            
-            pstmt.executeBatch();
-            conn.commit();
         } catch (SQLException e) {
+            if (conn != null) {
+                try { conn.rollback(); } catch (SQLException ex) { /* ignore */ }
+            }
             throw new RuntimeException("Failed to save health scores", e);
+        } finally {
+            if (conn != null) {
+                try { conn.close(); } catch (SQLException ex) { /* ignore */ }
+            }
         }
     }
 
@@ -157,50 +171,70 @@ public class AnalysisStore {
     public void savePatterns(List<com.repodna.discovery.model.DiscoveredPattern> patterns, long runId) {
         String sql = "INSERT INTO discovered_patterns (run_id, pattern_id, category, description, confidence, occurrences, total_opportunities, reasoning, evidence_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        try (Connection conn = dbManager.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = null;
+        try {
+            conn = dbManager.getConnection();
             conn.setAutoCommit(false);
-            for (com.repodna.discovery.model.DiscoveredPattern p : patterns) {
-                pstmt.setLong(1, runId);
-                pstmt.setString(2, p.id());
-                pstmt.setString(3, p.category());
-                pstmt.setString(4, p.description());
-                pstmt.setDouble(5, p.confidence());
-                pstmt.setInt(6, p.occurrences());
-                pstmt.setInt(7, p.totalOpportunities());
-                pstmt.setString(8, p.reasoning());
-                pstmt.setString(9, mapper.writeValueAsString(p.evidence()));
-                pstmt.addBatch();
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                for (com.repodna.discovery.model.DiscoveredPattern p : patterns) {
+                    pstmt.setLong(1, runId);
+                    pstmt.setString(2, p.id());
+                    pstmt.setString(3, p.category());
+                    pstmt.setString(4, p.description());
+                    pstmt.setDouble(5, p.confidence());
+                    pstmt.setInt(6, p.occurrences());
+                    pstmt.setInt(7, p.totalOpportunities());
+                    pstmt.setString(8, p.reasoning());
+                    pstmt.setString(9, mapper.writeValueAsString(p.evidence()));
+                    pstmt.addBatch();
+                }
+                pstmt.executeBatch();
+                conn.commit();
             }
-            pstmt.executeBatch();
-            conn.commit();
         } catch (Exception e) {
+            if (conn != null) {
+                try { conn.rollback(); } catch (SQLException ex) { /* ignore */ }
+            }
             throw new RuntimeException("Failed to save patterns", e);
+        } finally {
+            if (conn != null) {
+                try { conn.close(); } catch (SQLException ex) { /* ignore */ }
+            }
         }
     }
 
     public void saveRules(List<com.repodna.rules.model.EngineeringRule> rules, long runId) {
         String sql = "INSERT INTO engineering_rules (run_id, rule_id, category, description, rationale, confidence, supporting_examples, evidence_json, violations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        try (Connection conn = dbManager.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = null;
+        try {
+            conn = dbManager.getConnection();
             conn.setAutoCommit(false);
-            for (com.repodna.rules.model.EngineeringRule r : rules) {
-                pstmt.setLong(1, runId);
-                pstmt.setString(2, r.id());
-                pstmt.setString(3, r.category());
-                pstmt.setString(4, r.description());
-                pstmt.setString(5, r.rationale());
-                pstmt.setDouble(6, r.confidence());
-                pstmt.setInt(7, r.supportingExamples());
-                pstmt.setString(8, mapper.writeValueAsString(r.evidence()));
-                pstmt.setString(9, mapper.writeValueAsString(r.violations()));
-                pstmt.addBatch();
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                for (com.repodna.rules.model.EngineeringRule r : rules) {
+                    pstmt.setLong(1, runId);
+                    pstmt.setString(2, r.id());
+                    pstmt.setString(3, r.category());
+                    pstmt.setString(4, r.description());
+                    pstmt.setString(5, r.rationale());
+                    pstmt.setDouble(6, r.confidence());
+                    pstmt.setInt(7, r.supportingExamples());
+                    pstmt.setString(8, mapper.writeValueAsString(r.evidence()));
+                    pstmt.setString(9, mapper.writeValueAsString(r.violations()));
+                    pstmt.addBatch();
+                }
+                pstmt.executeBatch();
+                conn.commit();
             }
-            pstmt.executeBatch();
-            conn.commit();
         } catch (Exception e) {
+            if (conn != null) {
+                try { conn.rollback(); } catch (SQLException ex) { /* ignore */ }
+            }
             throw new RuntimeException("Failed to save rules", e);
+        } finally {
+            if (conn != null) {
+                try { conn.close(); } catch (SQLException ex) { /* ignore */ }
+            }
         }
     }
 
