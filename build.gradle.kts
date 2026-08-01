@@ -29,6 +29,10 @@ dependencies {
     // Jackson Configuration Parser
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
 
+    // JavaParser & Symbol Solver
+    implementation("com.github.javaparser:javaparser-core:3.28.2")
+    implementation("com.github.javaparser:javaparser-symbol-solver-core:3.28.2")
+
     // Logging: SLF4J + Logback
     implementation("org.slf4j:slf4j-api:2.0.16")
     implementation("ch.qos.logback:logback-classic:1.5.16")
