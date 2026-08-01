@@ -1,6 +1,7 @@
 package com.repodna.discovery.detectors;
 
 import com.repodna.discovery.model.*;
+import com.repodna.graph.GraphQueryEngine;
 import com.repodna.graph.RepositoryKnowledgeGraph;
 import com.repodna.graph.model.*;
 
@@ -14,12 +15,22 @@ import java.util.Map;
  */
 public class DependencyBoundaryDetector {
 
-    /**
-     * Extracts package-level communication statistics and checks boundary coupling rules.
-     */
-    public static List<DiscoveredPattern> detect(RepositoryKnowledgeGraph graph) {
-        List<DiscoveredPattern> patterns = new ArrayList<>();
+    public static List<Pattern> detect(RepositoryKnowledgeGraph graph) {
+        List<Pattern> patterns = new ArrayList<>();
 
+        int totalCommits = 1;
+        RkgNode gitNode = graph.getNodeById("git-metadata");
+        if (gitNode != null && gitNode.metadata().get("commits") != null) {
+            totalCommits = ((Number) gitNode.metadata().get("commits")).intValue();
+        }
+
+        detectPackageCoupling(graph, totalCommits, patterns);
+        detectCircularDependencies(graph, totalCommits, patterns);
+
+        return patterns;
+    }
+
+    private static void detectPackageCoupling(RepositoryKnowledgeGraph graph, int totalCommits, List<Pattern> results) {
         Map<String, Map<String, Integer>> packageDeps = new HashMap<>();
         int totalDependencies = 0;
 
@@ -41,6 +52,8 @@ public class DependencyBoundaryDetector {
 
         if (totalDependencies > 0) {
             List<PatternEvidence> evidence = new ArrayList<>();
+            List<PatternViolation> violations = new ArrayList<>();
+
             for (Map.Entry<String, Map<String, Integer>> entry : packageDeps.entrySet()) {
                 String src = entry.getKey();
                 for (Map.Entry<String, Integer> targetEntry : entry.getValue().entrySet()) {
@@ -56,26 +69,65 @@ public class DependencyBoundaryDetector {
             }
 
             // High Coupling Anomaly Detection
-            List<String> anomalies = new ArrayList<>();
             for (Map.Entry<String, Map<String, Integer>> entry : packageDeps.entrySet()) {
                 if (entry.getValue().size() > 3) {
-                    anomalies.add(entry.getKey() + " (coupled with " + entry.getValue().keySet() + ")");
+                    violations.add(new PatternViolation(
+                        entry.getKey(),
+                        "Package is highly coupled with " + entry.getValue().size() + " other packages",
+                        entry.getValue().keySet().toString()
+                    ));
                 }
             }
 
-            patterns.add(new DiscoveredPattern(
+            double score = violations.isEmpty() ? 1.0 : 1.0 - ((double) violations.size() / packageDeps.size());
+            score = Math.round(score * 100.0) / 100.0;
+
+            results.add(new Pattern(
                 "package-coupling-boundaries",
                 PatternCategory.DEPENDENCY,
+                "Package Dependency Boundaries",
                 "Explicit dependency boundaries verified between package namespaces",
-                0.9,
-                packageDeps.size(),
-                packageDeps.size(),
-                "Observed package dependencies and layer communication coupling.",
+                new PatternConfidence(score, packageDeps.size(), violations.size(), 1.0, score),
+                new PatternHistory(totalCommits, score, getStabilityByScore(score)),
                 evidence,
-                anomalies
+                violations
             ));
         }
+    }
 
-        return patterns;
+    private static void detectCircularDependencies(RepositoryKnowledgeGraph graph, int totalCommits, List<Pattern> results) {
+        GraphQueryEngine queryEngine = new GraphQueryEngine(graph);
+        List<String> cycles = queryEngine.findCircularDependencies();
+
+        List<PatternEvidence> evidence = new ArrayList<>();
+        List<PatternViolation> violations = new ArrayList<>();
+
+        if (!cycles.isEmpty()) {
+            for (String cycle : cycles) {
+                violations.add(new PatternViolation("cycle", "Circular dependency cycle detected", cycle));
+            }
+        } else {
+            evidence.add(new PatternEvidence("graph", "No circular dependencies detected", 0, ""));
+        }
+
+        double score = cycles.isEmpty() ? 1.0 : 0.0;
+
+        results.add(new Pattern(
+            "circular-dependencies",
+            PatternCategory.DEPENDENCY,
+            "Acyclic Class Dependency Graph",
+            "Classes do not participate in circular dependencies",
+            new PatternConfidence(score, cycles.isEmpty() ? 1 : 0, cycles.size(), 1.0, score),
+            new PatternHistory(totalCommits, score, getStabilityByScore(score)),
+            evidence,
+            violations
+        ));
+    }
+
+    private static PatternStability getStabilityByScore(double score) {
+        if (score >= 0.9) return PatternStability.STABLE;
+        if (score >= 0.7) return PatternStability.EMERGING;
+        if (score >= 0.4) return PatternStability.EXPERIMENTAL;
+        return PatternStability.DECLINING;
     }
 }

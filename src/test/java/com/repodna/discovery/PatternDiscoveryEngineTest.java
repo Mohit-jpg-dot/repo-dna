@@ -20,26 +20,27 @@ public class PatternDiscoveryEngineTest {
         meta1.put("annotations", List.of("Service"));
         RkgNode conformant = new RkgNode("com.example.UserService", RkgNodeType.CLASS, "UserService.java", meta1, 1);
 
-        // 1 Service not ending with Service (exception)
+        // 1 Service not ending with Service (exception/violation)
         Map<String, Object> meta2 = new HashMap<>();
         meta2.put("annotations", List.of("Service"));
-        RkgNode exception = new RkgNode("com.example.UserProcessor", RkgNodeType.CLASS, "UserProcessor.java", meta2, 1);
+        RkgNode violation = new RkgNode("com.example.UserProcessor", RkgNodeType.CLASS, "UserProcessor.java", meta2, 1);
 
         graph.addNode(conformant);
-        graph.addNode(exception);
+        graph.addNode(violation);
 
         PatternDiscoveryEngine engine = new PatternDiscoveryEngine(graph);
-        List<DiscoveredPattern> patterns = engine.discover();
+        List<Pattern> patterns = engine.discover();
 
-        DiscoveredPattern namingPattern = patterns.stream()
+        Pattern namingPattern = patterns.stream()
             .filter(p -> "naming-suffix-service".equals(p.id()))
             .findFirst()
             .orElseThrow();
 
-        assertThat(namingPattern.confidence()).isEqualTo(0.5);
-        assertThat(namingPattern.occurrences()).isEqualTo(1);
-        assertThat(namingPattern.totalOpportunities()).isEqualTo(2);
-        assertThat(namingPattern.exceptionsList()).containsExactly("com.example.UserProcessor");
+        assertThat(namingPattern.confidence().score()).isEqualTo(0.5);
+        assertThat(namingPattern.confidence().supportCount()).isEqualTo(1);
+        assertThat(namingPattern.confidence().violationCount()).isEqualTo(1);
+        assertThat(namingPattern.violationsList().get(0).nodeId()).isEqualTo("com.example.UserProcessor");
+        assertThat(namingPattern.history().stability()).isEqualTo(PatternStability.EXPERIMENTAL);
     }
 
     @Test
@@ -60,25 +61,24 @@ public class PatternDiscoveryEngineTest {
         graph.addNode(bean2);
 
         PatternDiscoveryEngine engine = new PatternDiscoveryEngine(graph);
-        List<DiscoveredPattern> patterns = engine.discover();
+        List<Pattern> patterns = engine.discover();
 
-        DiscoveredPattern constructorPattern = patterns.stream()
+        Pattern constructorPattern = patterns.stream()
             .filter(p -> "spring-constructor-injection".equals(p.id()))
             .findFirst()
             .orElseThrow();
 
-        DiscoveredPattern fieldPattern = patterns.stream()
+        Pattern fieldPattern = patterns.stream()
             .filter(p -> "spring-field-injection".equals(p.id()))
             .findFirst()
             .orElseThrow();
 
-        assertThat(constructorPattern.confidence()).isEqualTo(0.5);
-        assertThat(constructorPattern.occurrences()).isEqualTo(1);
-        assertThat(constructorPattern.totalOpportunities()).isEqualTo(2);
-        assertThat(constructorPattern.exceptionsList()).containsExactly("com.example.OrderService$SpringBean");
+        assertThat(constructorPattern.confidence().score()).isEqualTo(0.5);
+        assertThat(constructorPattern.confidence().supportCount()).isEqualTo(1);
+        assertThat(constructorPattern.violationsList().get(0).nodeId()).isEqualTo("com.example.OrderService$SpringBean");
 
-        assertThat(fieldPattern.confidence()).isEqualTo(0.5);
-        assertThat(fieldPattern.exceptionsList()).containsExactly("com.example.UserService$SpringBean");
+        assertThat(fieldPattern.confidence().score()).isEqualTo(0.5);
+        assertThat(fieldPattern.violationsList().get(0).nodeId()).isEqualTo("com.example.UserService$SpringBean");
     }
 
     @Test
@@ -97,16 +97,16 @@ public class PatternDiscoveryEngineTest {
         graph.addNode(test2);
 
         PatternDiscoveryEngine engine = new PatternDiscoveryEngine(graph);
-        List<DiscoveredPattern> patterns = engine.discover();
+        List<Pattern> patterns = engine.discover();
 
-        DiscoveredPattern suffixTest = patterns.stream()
+        Pattern suffixTest = patterns.stream()
             .filter(p -> "test-naming-test".equals(p.id()))
             .findFirst()
             .orElseThrow();
 
-        assertThat(suffixTest.occurrences()).isEqualTo(1);
-        assertThat(suffixTest.totalOpportunities()).isEqualTo(2);
-        assertThat(suffixTest.confidence()).isEqualTo(0.5);
+        assertThat(suffixTest.confidence().supportCount()).isEqualTo(1);
+        assertThat(suffixTest.confidence().violationCount()).isEqualTo(1);
+        assertThat(suffixTest.confidence().score()).isEqualTo(0.5);
     }
 
     @Test
@@ -126,14 +126,73 @@ public class PatternDiscoveryEngineTest {
         graph.addEdge(new RkgEdge("com.example.controller.UserController", "com.example.service.UserService", RkgEdgeType.DEPENDS_ON, 1.0, Collections.emptyList(), null));
 
         PatternDiscoveryEngine engine = new PatternDiscoveryEngine(graph);
-        List<DiscoveredPattern> patterns = engine.discover();
+        List<Pattern> patterns = engine.discover();
 
-        DiscoveredPattern boundaryPattern = patterns.stream()
+        Pattern boundaryPattern = patterns.stream()
             .filter(p -> "package-coupling-boundaries".equals(p.id()))
             .findFirst()
             .orElseThrow();
 
-        assertThat(boundaryPattern.occurrences()).isEqualTo(1);
+        assertThat(boundaryPattern.confidence().supportCount()).isEqualTo(1);
         assertThat(boundaryPattern.evidenceList().get(0).snippet()).isEqualTo("com.example.controller -> com.example.service");
+    }
+
+    @Test
+    public void shouldCacheDiscoveredPatterns() {
+        RepositoryKnowledgeGraph graph = new RepositoryKnowledgeGraph();
+        PatternDiscoveryEngine engine = new PatternDiscoveryEngine(graph);
+
+        List<Pattern> run1 = engine.discover();
+        List<Pattern> run2 = engine.discover();
+
+        // Check reference identity to confirm caching
+        assertThat(run1).isSameAs(run2);
+
+        engine.invalidateCache();
+        List<Pattern> run3 = engine.discover();
+        assertThat(run1).isNotSameAs(run3);
+    }
+
+    @Test
+    public void shouldCompareSnapshotsForEvolution() {
+        RepositoryKnowledgeGraph baseline = new RepositoryKnowledgeGraph();
+        RepositoryKnowledgeGraph current = new RepositoryKnowledgeGraph();
+
+        // Baseline has constructor injection for 1 bean (confidence 1.0)
+        Map<String, Object> meta1 = new HashMap<>();
+        meta1.put("injectionStyle", "Constructor Injection");
+        RkgNode beanBase = new RkgNode("com.example.UserService$SpringBean", RkgNodeType.FRAMEWORK_COMPONENT, "UserService.java", meta1, 1);
+        baseline.addNode(beanBase);
+
+        // Current has constructor injection for 1 bean and field injection for 1 bean (confidence drops to 0.5)
+        RkgNode beanCur1 = new RkgNode("com.example.UserService$SpringBean", RkgNodeType.FRAMEWORK_COMPONENT, "UserService.java", meta1, 1);
+        Map<String, Object> meta2 = new HashMap<>();
+        meta2.put("injectionStyle", "Field Injection");
+        RkgNode beanCur2 = new RkgNode("com.example.OrderService$SpringBean", RkgNodeType.FRAMEWORK_COMPONENT, "OrderService.java", meta2, 1);
+        current.addNode(beanCur1);
+        current.addNode(beanCur2);
+
+        PatternEvolution evolution = PatternDiscoveryEngine.compare(baseline, current);
+
+        // spring-field-injection was strengthened (score went from 0.0 to 0.5)
+        // spring-constructor-injection was weakened (score went from 1.0 to 0.5)
+        assertThat(evolution.strengthened()).extracting(Pattern::id).contains("spring-field-injection");
+        assertThat(evolution.weakened()).extracting(Pattern::id).contains("spring-constructor-injection");
+    }
+
+    @Test
+    public void shouldSupportQueryApis() {
+        RepositoryKnowledgeGraph graph = new RepositoryKnowledgeGraph();
+
+        Map<String, Object> serviceMeta = new HashMap<>();
+        serviceMeta.put("annotations", List.of("Service"));
+        RkgNode service = new RkgNode("com.example.UserService", RkgNodeType.CLASS, "UserService.java", serviceMeta, 1);
+        graph.addNode(service);
+
+        PatternDiscoveryEngine engine = new PatternDiscoveryEngine(graph);
+
+        assertThat(engine.getNamingConventions()).isNotEmpty();
+        assertThat(engine.getTestingStrategy()).isEmpty(); // No test classes added
+        assertThat(engine.getDominantPatterns()).isNotEmpty(); // Suffix matching has score 1.0
     }
 }
