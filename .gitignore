@@ -1,0 +1,11 @@
+# Gradle
+build/
+.gradle/
+*.class
+
+# IDE
+.idea/
+*.iml
+
+# RepoDNA
+.repodna/
