@@ -12,7 +12,7 @@ This document outlines the engineering patterns discovered in the repository.
 - **Category**: NAMING
 - **Description**: Classes representing exceptions should end with the suffix 'Exception'
 - **Confidence**: 100.0% (Support: 5, Violations: 0)
-- **Stability**: STABLE (Age: 11 commits)
+- **Stability**: STABLE (Age: 13 commits)
 
 #### Evidence
 - `com.repodna.exception.RepoDnaException`: Exception class ends with 'Exception'
@@ -27,7 +27,7 @@ This document outlines the engineering patterns discovered in the repository.
 - **Category**: TESTING
 - **Description**: Unit test classes use the 'Test' suffix
 - **Confidence**: 89.0% (Support: 8, Violations: 0)
-- **Stability**: EMERGING (Age: 11 commits)
+- **Stability**: EMERGING (Age: 13 commits)
 
 #### Evidence
 - `com.repodna.scanner.RepositoryScannerTest`: Test ends with Test
@@ -45,7 +45,7 @@ This document outlines the engineering patterns discovered in the repository.
 - **Category**: TESTING
 - **Description**: Unit test classes use the 'Tests' suffix
 - **Confidence**: 0.0% (Support: 0, Violations: 8)
-- **Stability**: DECLINING (Age: 11 commits)
+- **Stability**: DECLINING (Age: 13 commits)
 
 #### Violations / Outliers
 - `com.repodna.scanner.RepositoryScannerTest`: Test ends with Test (violates Tests suffix)
@@ -63,7 +63,7 @@ This document outlines the engineering patterns discovered in the repository.
 - **Category**: DEPENDENCY
 - **Description**: Explicit dependency boundaries verified between package namespaces
 - **Confidence**: 63.0% (Support: 8, Violations: 3)
-- **Stability**: EXPERIMENTAL (Age: 11 commits)
+- **Stability**: EXPERIMENTAL (Age: 13 commits)
 
 #### Evidence
 - `com.repodna.parser`: Package com.repodna.parser depends on com.repodna.parser.model (66 links)
@@ -105,7 +105,7 @@ This document outlines the engineering patterns discovered in the repository.
 - **Category**: DEPENDENCY
 - **Description**: Classes do not participate in circular dependencies
 - **Confidence**: 100.0% (Support: 1, Violations: 0)
-- **Stability**: STABLE (Age: 11 commits)
+- **Stability**: STABLE (Age: 13 commits)
 
 #### Evidence
 - `graph`: No circular dependencies detected
